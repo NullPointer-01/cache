@@ -4,12 +4,12 @@ import java.util.*;
 
 public class LFUEvictionPolicy<K> implements EvictionPolicy<K> {
     private final Map<K, Integer> freqMap;
-    private final TreeMap<Integer, LinkedHashSet<K>> freqBuckets;
+    private final Map<Integer, LinkedHashSet<K>> freqBuckets;
     private int minFreq;
 
     public LFUEvictionPolicy() {
         this.freqMap = new HashMap<>();
-        this.freqBuckets = new TreeMap<>();
+        this.freqBuckets = new HashMap<>();
         this.minFreq = 0;
     }
 
@@ -44,8 +44,11 @@ public class LFUEvictionPolicy<K> implements EvictionPolicy<K> {
 
         if (freqBuckets.get(freq).isEmpty()) {
             freqBuckets.remove(freq);
-            // Removing a key can leave any frequency as the new min.
-            minFreq = freqBuckets.isEmpty() ? 0 : freqBuckets.firstKey();
+            // Rare scenario: O(n) scan only when a bucket is fully drained by removal
+            // Hence, Hashmap is preferred over TreeMap for maintaining frequency counts
+            if (freq == minFreq) {
+                minFreq = freqMap.values().stream().mapToInt(i -> i).min().orElse(0);
+            }
         }
     }
 
