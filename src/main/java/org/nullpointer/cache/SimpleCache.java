@@ -1,42 +1,40 @@
 package org.nullpointer.cache;
 
 import org.nullpointer.cache.evictionpolicy.EvictionPolicy;
-import org.nullpointer.cache.exceptions.CapacityExceededException;
-import org.nullpointer.cache.exceptions.KeyNotFoundException;
-import org.nullpointer.cache.storage.Storage;
 
-public class SimpleCache<K, V> implements Cache<K,V> {
-    private final Storage<K, V> storage;
+import java.util.HashMap;
+import java.util.Map;
+
+public class SimpleCache<K, V> implements Cache<K, V> {
+    private final Map<K, V> map;
+    private final int capacity;
     private final EvictionPolicy<K> evictionPolicy;
 
-    public SimpleCache(Storage<K, V> storage, EvictionPolicy<K> evictionPolicy) {
-        this.storage = storage;
+    public SimpleCache(int capacity, EvictionPolicy<K> evictionPolicy) {
+        this.capacity = capacity;
         this.evictionPolicy = evictionPolicy;
+        this.map = new HashMap<>();
     }
 
     @Override
     public void set(K key, V value) {
-        try {
-            this.storage.add(key, value);
-            this.evictionPolicy.onKeyAccess(key);
-        } catch (CapacityExceededException ignored) {
-            K keyToEvict = this.evictionPolicy.evictionCandidate()
-                    .orElseThrow(() -> new RuntimeException("Error while inserting key into cache..."));
-            this.storage.remove(keyToEvict);
-            this.evictionPolicy.onKeyRemove(keyToEvict);
-            set(key, value);
+        if (!map.containsKey(key) && map.size() >= capacity) {
+            K candidate = evictionPolicy.evictionCandidate()
+                    .orElseThrow(() -> new RuntimeException("Eviction policy returned no candidate"));
+            map.remove(candidate);
+            evictionPolicy.onKeyRemove(candidate);
         }
+        map.put(key, value);
+        evictionPolicy.onKeyAccess(key);
     }
 
     @Override
     public V get(K key) {
-        try {
-            V value = this.storage.get(key);
-            this.evictionPolicy.onKeyAccess(key);
-            return value;
-        } catch (KeyNotFoundException ignored) {
+        if (!map.containsKey(key)) {
             return null;
         }
+        evictionPolicy.onKeyAccess(key);
+        return map.get(key);
     }
 }
 

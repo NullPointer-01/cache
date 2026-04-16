@@ -4,7 +4,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.nullpointer.cache.evictionpolicy.LRUEvictionPolicy;
-import org.nullpointer.cache.storage.InMemoryStorage;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -24,7 +23,7 @@ class SimpleCacheTest {
     }
 
     private Cache<String, Integer> buildCache(int capacity) {
-        return new SimpleCache<>(new InMemoryStorage<>(capacity), new LRUEvictionPolicy<>());
+        return new SimpleCache<>(capacity, new LRUEvictionPolicy<>());
     }
 
     @Test
@@ -127,5 +126,28 @@ class SimpleCacheTest {
         assertEquals(2, cache.get("b"));
         assertEquals(3, cache.get("c"));
         assertEquals(4, cache.get("d"));
+    }
+
+    @Test
+    void exactlyCapacityKeysStoredWithoutEviction() {
+        cache.set("a", 1);
+        cache.set("b", 2);
+        cache.set("c", 3);
+
+        assertEquals(1, cache.get("a"));
+        assertEquals(2, cache.get("b"));
+        assertEquals(3, cache.get("c"));
+    }
+
+    @Test
+    void overwritingKeyAtFullCapacityDoesNotEvictAnyEntry() {
+        cache.set("a", 1);
+        cache.set("b", 2);
+        cache.set("c", 3); // full
+        cache.set("a", 99); // overwrite — must not evict "b" or "c"
+
+        assertEquals(99, cache.get("a"));
+        assertEquals(2, cache.get("b"));
+        assertEquals(3, cache.get("c"));
     }
 }
