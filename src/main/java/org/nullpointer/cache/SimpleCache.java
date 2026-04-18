@@ -2,7 +2,6 @@ package org.nullpointer.cache;
 
 import org.nullpointer.cache.evictionpolicy.EvictionPolicy;
 import org.nullpointer.cache.model.Event;
-import org.nullpointer.cache.model.EventType;
 import org.nullpointer.cache.model.StripedBuffer;
 
 import java.util.ArrayList;
@@ -21,7 +20,7 @@ public class SimpleCache<K, V> implements Cache<K, V> {
     private final ScheduledExecutorService scheduler;
     private final ScheduledFuture<?> future;
 
-    private static final int DRAIN_LIMIT_PER_STRIPE = 16;
+    private static final int READ_DRAIN_LIMIT_PER_STRIPE = 16;
     private static final int BUFFERS_SIZE = 16;
 
     public SimpleCache(int capacity, EvictionPolicy<K> evictionPolicy) {
@@ -43,8 +42,13 @@ public class SimpleCache<K, V> implements Cache<K, V> {
 
     @Override
     public void set(K key, V value) {
-        map.put(key, value);
-        buffers.get(stripeIndex()).offer(new Event<>(EventType.ACCESS, key));
+        V old = map.put(key, value);
+        StripedBuffer<K> stripe = buffers.get(stripeIndex());
+        if (old == null) {
+            stripe.recordAdd(key);
+        } else {
+            stripe.recordUpdate(key);
+        }
         tryMaintenance();
     }
 
@@ -52,7 +56,7 @@ public class SimpleCache<K, V> implements Cache<K, V> {
     public V get(K key) {
         V value = map.get(key);
         if (value != null) {
-            buffers.get(stripeIndex()).offer(new Event<>(EventType.ACCESS, key));
+            buffers.get(stripeIndex()).recordAccess(key);
         }
         return value;
     }
@@ -60,7 +64,7 @@ public class SimpleCache<K, V> implements Cache<K, V> {
     @Override
     public void remove(K key) {
         if (map.remove(key) != null) {
-            buffers.get(stripeIndex()).offer(new Event<>(EventType.REMOVE, key));
+            buffers.get(stripeIndex()).recordRemoval(key);
             tryMaintenance();
         }
     }
@@ -95,22 +99,29 @@ public class SimpleCache<K, V> implements Cache<K, V> {
     }
 
     private void drainAndEvict() {
+        // Step 1: Drain all write events first
         for (int i = 0; i < BUFFERS_SIZE; i++) {
             Event<K> event;
-            int stripeDrained = 0;
-
-            while (stripeDrained++ < DRAIN_LIMIT_PER_STRIPE && (event = buffers.get(i).poll()) != null) {
+            while ((event = buffers.get(i).pollWrite()) != null) {
                 switch (event.getType()) {
-                    case ACCESS -> {
-                        if (map.containsKey(event.getKey())) {
-                            evictionPolicy.onKeyAccess(event.getKey());
-                        }
-                    }
-                    case REMOVE -> evictionPolicy.onKeyRemove(event.getKey());
+                    case ADD, UPDATE -> evictionPolicy.onKeyAccess(event.getKey());
+                    case REMOVE      -> evictionPolicy.onKeyRemove(event.getKey());
                 }
             }
         }
 
+        // Step 2: Drain read events — bounded per stripe
+        for (int i = 0; i < BUFFERS_SIZE; i++) {
+            K key;
+            int stripeDrained = 0;
+            while (stripeDrained++ < READ_DRAIN_LIMIT_PER_STRIPE && (key = buffers.get(i).pollAccess()) != null) {
+                if (map.containsKey(key)) {
+                    evictionPolicy.onKeyAccess(key);
+                }
+            }
+        }
+
+        // Step 3: Enforce capacity
         while (map.size() > capacity) {
             Optional<K> candidate = evictionPolicy.evictionCandidate();
             if (candidate.isEmpty()) break;

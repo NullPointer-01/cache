@@ -122,11 +122,15 @@ class SimpleCacheTest {
     void interlevedGetsAndSetsEvictCorrectKey() {
         cache.set("a", 1);
         cache.set("b", 2);
-        cache.get("a");    // LRU order: [b, a]
-        cache.set("c", 3); // LRU order: [b, a, c]
-        cache.get("b");    // LRU order: [a, c, b]
-        cache.set("d", 4); // "a" is evicted
-        cache.runMaintenance();
+        cache.runMaintenance();  // flush add events → LRU: [a, b]
+        cache.get("a");          // promote a → read buffer
+        cache.runMaintenance();  // flush → LRU: [b, a]
+        cache.set("c", 3);
+        cache.runMaintenance();  // flush → LRU: [b, a, c]
+        cache.get("b");          // promote b → read buffer
+        cache.set("d", 4);       // add d → write buffer
+        cache.runMaintenance();  // Phase 1: onKeyAccess(d) → Phase 2: onKeyAccess(b)
+                                 // LRU: [a, c, d, b] → evict a
 
         assertNull(cache.get("a"));
         assertEquals(2, cache.get("b"));
