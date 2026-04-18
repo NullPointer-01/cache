@@ -1,7 +1,12 @@
 package org.nullpointer.cache;
 
 import org.nullpointer.cache.evictionpolicy.EvictionPolicy;
+import org.nullpointer.cache.model.Event;
+import org.nullpointer.cache.model.EventType;
+import org.nullpointer.cache.model.StripedBuffer;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
@@ -11,21 +16,23 @@ public class SimpleCache<K, V> implements Cache<K, V> {
     private final int capacity;
     private final EvictionPolicy<K> evictionPolicy;
 
-    private final ConcurrentLinkedQueue<Event<K>> eventBuffer;
+    private final List<StripedBuffer<K>> buffers;
     private final ReentrantLock maintenanceLock;
     private final ScheduledExecutorService scheduler;
     private final ScheduledFuture<?> future;
 
-    private static final int DRAIN_LIMIT = 64;
+    private static final int DRAIN_LIMIT_PER_STRIPE = 16;
+    private static final int BUFFERS_SIZE = 16;
 
     public SimpleCache(int capacity, EvictionPolicy<K> evictionPolicy) {
         this.capacity = capacity;
         this.evictionPolicy = evictionPolicy;
 
         this.map = new ConcurrentHashMap<>();
-        this.eventBuffer = new ConcurrentLinkedQueue<>();
-        this.maintenanceLock = new ReentrantLock();
+        this.buffers = new ArrayList<>(BUFFERS_SIZE);
+        for (int i = 0; i < BUFFERS_SIZE; i++) this.buffers.add(new StripedBuffer<>());
 
+        this.maintenanceLock = new ReentrantLock();
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "maintenance-thread");
             t.setDaemon(true);
@@ -37,7 +44,7 @@ public class SimpleCache<K, V> implements Cache<K, V> {
     @Override
     public void set(K key, V value) {
         map.put(key, value);
-        eventBuffer.offer(new Event<>(EventType.ACCESS, key));
+        buffers.get(stripeIndex()).offer(new Event<>(EventType.ACCESS, key));
         tryMaintenance();
     }
 
@@ -45,7 +52,7 @@ public class SimpleCache<K, V> implements Cache<K, V> {
     public V get(K key) {
         V value = map.get(key);
         if (value != null) {
-            eventBuffer.offer(new Event<>(EventType.ACCESS, key));
+            buffers.get(stripeIndex()).offer(new Event<>(EventType.ACCESS, key));
         }
         return value;
     }
@@ -53,7 +60,7 @@ public class SimpleCache<K, V> implements Cache<K, V> {
     @Override
     public void remove(K key) {
         if (map.remove(key) != null) {
-            eventBuffer.offer(new Event<>(EventType.REMOVE, key));
+            buffers.get(stripeIndex()).offer(new Event<>(EventType.REMOVE, key));
             tryMaintenance();
         }
     }
@@ -88,17 +95,19 @@ public class SimpleCache<K, V> implements Cache<K, V> {
     }
 
     private void drainAndEvict() {
-        Event<K> event;
-        int drained = 0;
+        for (int i = 0; i < BUFFERS_SIZE; i++) {
+            Event<K> event;
+            int stripeDrained = 0;
 
-        while (drained++ < DRAIN_LIMIT && (event = eventBuffer.poll()) != null) {
-            switch (event.type) {
-                case ACCESS -> {
-                    if (map.containsKey(event.key)) {
-                        evictionPolicy.onKeyAccess(event.key);
+            while (stripeDrained++ < DRAIN_LIMIT_PER_STRIPE && (event = buffers.get(i).poll()) != null) {
+                switch (event.getType()) {
+                    case ACCESS -> {
+                        if (map.containsKey(event.getKey())) {
+                            evictionPolicy.onKeyAccess(event.getKey());
+                        }
                     }
+                    case REMOVE -> evictionPolicy.onKeyRemove(event.getKey());
                 }
-                case REMOVE -> evictionPolicy.onKeyRemove(event.key);
             }
         }
 
@@ -111,8 +120,8 @@ public class SimpleCache<K, V> implements Cache<K, V> {
         }
     }
 
-    private enum EventType { ACCESS, REMOVE }
-
-    private record Event<K>(EventType type, K key) {}
+    private int stripeIndex() {
+        return (int) (Thread.currentThread().getId() % BUFFERS_SIZE);
+    }
 }
 
