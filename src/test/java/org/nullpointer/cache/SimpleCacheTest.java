@@ -1,6 +1,6 @@
 package org.nullpointer.cache;
 
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.nullpointer.cache.evictionpolicy.LRUEvictionPolicy;
@@ -9,20 +9,19 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class SimpleCacheTest {
 
-    private Cache<String, Integer> cache;
-    private static CacheFactory<String, Integer> factory;
-
-    @BeforeAll
-    static void init() {
-        factory = new CacheFactory<>();
-    }
+    private SimpleCache<String, Integer> cache;
 
     @BeforeEach
     void setUp() {
-        cache = factory.defaultCache(3);
+        cache = new SimpleCache<>(3, new LRUEvictionPolicy<>());
     }
 
-    private Cache<String, Integer> buildCache(int capacity) {
+    @AfterEach
+    void tearDown() {
+        cache.stop();
+    }
+
+    private SimpleCache<String, Integer> buildCache(int capacity) {
         return new SimpleCache<>(capacity, new LRUEvictionPolicy<>());
     }
 
@@ -51,6 +50,7 @@ class SimpleCacheTest {
         cache.set("b", 2);
         cache.set("c", 3);
         cache.set("d", 4); // triggers eviction of "a"
+        cache.runMaintenance();
 
         assertNull(cache.get("a"));
         assertEquals(2, cache.get("b"));
@@ -65,6 +65,7 @@ class SimpleCacheTest {
         cache.set("c", 3);
         cache.get("a");    // promote "a" → LRU order: [b, c, a]
         cache.set("d", 4); // "b" is evicted
+        cache.runMaintenance();
 
         assertNull(cache.get("b"));
         assertEquals(1, cache.get("a"));
@@ -79,6 +80,7 @@ class SimpleCacheTest {
         cache.set("c", 3);
         cache.set("a", 9); // overwrite "a" → LRU order: [b, c, a]
         cache.set("d", 4); // "b" is evicted
+        cache.runMaintenance();
 
         assertNull(cache.get("b"));
         assertEquals(9, cache.get("a"));
@@ -94,6 +96,7 @@ class SimpleCacheTest {
         cache.set("d", 4); // evicts "a"
         cache.set("e", 5); // evicts "b"
         cache.set("f", 6); // evicts "c"
+        cache.runMaintenance();
 
         assertNull(cache.get("a"));
         assertNull(cache.get("b"));
@@ -105,12 +108,14 @@ class SimpleCacheTest {
 
     @Test
     void capacityOfOneAlwaysEvictsPreviousEntry() {
-        Cache<String, Integer> singleSlot = buildCache(1);
+        SimpleCache<String, Integer> singleSlot = buildCache(1);
         singleSlot.set("a", 1);
         singleSlot.set("b", 2);
+        singleSlot.runMaintenance();
 
         assertNull(singleSlot.get("a"));
         assertEquals(2, singleSlot.get("b"));
+        singleSlot.stop();
     }
 
     @Test
@@ -121,6 +126,7 @@ class SimpleCacheTest {
         cache.set("c", 3); // LRU order: [b, a, c]
         cache.get("b");    // LRU order: [a, c, b]
         cache.set("d", 4); // "a" is evicted
+        cache.runMaintenance();
 
         assertNull(cache.get("a"));
         assertEquals(2, cache.get("b"));
@@ -145,6 +151,7 @@ class SimpleCacheTest {
         cache.set("b", 2);
         cache.set("c", 3); // full
         cache.set("a", 99); // overwrite — must not evict "b" or "c"
+        cache.runMaintenance();
 
         assertEquals(99, cache.get("a"));
         assertEquals(2, cache.get("b"));
@@ -172,6 +179,7 @@ class SimpleCacheTest {
         cache.set("c", 3); // full
         cache.remove("b");
         cache.set("d", 4); // must not evict — slot is free
+        cache.runMaintenance();
 
         assertEquals(1, cache.get("a"));
         assertNull(cache.get("b"));
