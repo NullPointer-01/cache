@@ -150,4 +150,32 @@ class SimpleCacheTest {
         assertEquals(2, cache.get("b"));
         assertEquals(3, cache.get("c"));
     }
+
+    @Test
+    void removedKeyIsNoLongerRetrievable() {
+        cache.set("a", 1);
+        cache.remove("a");
+        assertNull(cache.get("a"));
+    }
+
+    @Test
+    void removeOnAbsentKeyIsNoOp() {
+        cache.set("a", 1);
+        assertDoesNotThrow(() -> cache.remove("ghost"));
+        assertEquals(1, cache.get("a"));
+    }
+
+    @Test
+    void removingKeyFreesCapacityForNewEntry() {
+        cache.set("a", 1);
+        cache.set("b", 2);
+        cache.set("c", 3); // full
+        cache.remove("b");
+        cache.set("d", 4); // must not evict — slot is free
+
+        assertEquals(1, cache.get("a"));
+        assertNull(cache.get("b"));
+        assertEquals(3, cache.get("c"));
+        assertEquals(4, cache.get("d"));
+    }
 }

@@ -36,5 +36,12 @@ public class SimpleCache<K, V> implements Cache<K, V> {
         evictionPolicy.onKeyAccess(key);
         return map.get(key);
     }
+
+    @Override
+    public void remove(K key) {
+        if (map.remove(key) != null) {
+            evictionPolicy.onKeyRemove(key);
+        }
+    }
 }
 
