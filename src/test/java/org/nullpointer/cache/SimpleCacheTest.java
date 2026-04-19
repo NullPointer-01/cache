@@ -3,7 +3,6 @@ package org.nullpointer.cache;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.nullpointer.cache.evictionpolicy.LRUEvictionPolicy;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -13,7 +12,7 @@ class SimpleCacheTest {
 
     @BeforeEach
     void setUp() {
-        cache = new SimpleCache<>(3, new LRUEvictionPolicy<>());
+        cache = new SimpleCache<>(CacheConfig.<String>builder().capacity(3).build());
     }
 
     @AfterEach
@@ -22,7 +21,7 @@ class SimpleCacheTest {
     }
 
     private SimpleCache<String, Integer> buildCache(int capacity) {
-        return new SimpleCache<>(capacity, new LRUEvictionPolicy<>());
+        return new SimpleCache<>(CacheConfig.<String>builder().capacity(capacity).build());
     }
 
     @Test
