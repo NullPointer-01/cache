@@ -33,6 +33,11 @@ public class CacheEntry<K, V> implements Comparable<CacheEntry<K, V>> {
 
     @Override
     public int compareTo(CacheEntry<K, V> other) {
+        // 0 means no TTL / never expires
+        if (this.expiresAtNanos == 0 && other.expiresAtNanos == 0) return 0;
+        if (this.expiresAtNanos == 0) return 1;
+
+        if (other.expiresAtNanos == 0) return -1;
         return Long.compare(this.expiresAtNanos, other.expiresAtNanos);
     }
 }
